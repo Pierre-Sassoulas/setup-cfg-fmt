@@ -96,14 +96,16 @@ def _case_insensitive_glob(s: str) -> str:
     return GLOB_PART.sub(cb, s)
 
 
-def _first_file(setup_cfg: str, prefix: str) -> Optional[str]:
+def _all_files(setup_cfg: str, prefix: str) -> Optional[List[str]]:
+    filenames = []
     prefix = _case_insensitive_glob(prefix)
     path = _adjacent_filename(setup_cfg, prefix)
     for filename in sorted(glob.iglob(f'{path}*')):
         if os.path.isfile(filename):
-            return filename
-    else:
+            filenames.append(filename)
+    if not filenames:
         return None
+    return filenames
 
 
 def _py3_excluded(min_py3_version: Tuple[int, int]) -> Set[Tuple[int, int]]:
@@ -365,12 +367,12 @@ def format_file(
     cfg['metadata']['name'] = cfg['metadata']['name'].replace('-', '_')
 
     # if README.md exists, set `long_description` + content type
-    readme = _first_file(filename, 'readme')
-    if readme is not None:
-        long_description = f'file: {os.path.basename(readme)}'
+    readmes = _all_files(filename, 'readme')
+    if readmes is not None:
+        long_description = f'file: {", ".join([os.path.basename(r) for r in readmes])}'
         cfg['metadata']['long_description'] = long_description
 
-        tags = identify.tags_from_filename(readme)
+        tags = identify.tags_from_filename(readmes[0])
         if 'markdown' in tags:
             cfg['metadata']['long_description_content_type'] = 'text/markdown'
         elif 'rst' in tags:
@@ -379,18 +381,20 @@ def format_file(
             cfg['metadata']['long_description_content_type'] = 'text/plain'
 
     # set license fields if a license exists
-    license_filename = _first_file(filename, 'licen[sc]e')
-    if license_filename is not None:
-        cfg['metadata']['license_file'] = os.path.basename(license_filename)
+    license_filenames = _all_files(filename, 'licen[sc]e')
+    if license_filenames is not None:
+        cfg['metadata']['license_files'] = "\n   ".join([os.path.basename(f) for f in license_filenames])
+        license_ids = [identify.license_id(i) for i in license_filenames]
+        license_ids = [i for i in license_ids if i is not None]
+        if len(license_ids) > 1:
+            raise RuntimeError(f"There is more than one license: {license_ids}")
+        if license_ids:
+            cfg['metadata']['license'] = license_ids[0]
 
-        license_id = identify.license_id(license_filename)
-        if license_id is not None:
-            cfg['metadata']['license'] = license_id
-
-        if license_id in LICENSE_TO_CLASSIFIER:
+        if license_ids and license_ids[0] in LICENSE_TO_CLASSIFIER:
             cfg['metadata']['classifiers'] = (
                 cfg['metadata'].get('classifiers', '').rstrip() +
-                f'\n{LICENSE_TO_CLASSIFIER[license_id]}'
+                f'\n{LICENSE_TO_CLASSIFIER[license_ids[0]]}'
             )
 
     requires = _python_requires(filename, min_py3_version=min_py3_version)
